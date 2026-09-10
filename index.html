@@ -523,7 +523,7 @@
   let myPin = shortCode();
   let peer = null;
   let activeConn = null;
-  const CHUNK_SIZE = 256 * 1024; // 256KB — tuned for large-file throughput
+  const CHUNK_SIZE = 512 * 1024; // 512KB — pushed further now backpressure is event-driven, not polled
 
   const el = (id) => document.getElementById(id);
   const myCodeEl = el('myCode');
@@ -769,7 +769,7 @@
     return row;
   }
 
-  function sendFile(file){
+  async function sendFile(file){
     if(!activeConn){
       showError('Connect to a device first.');
       return;
@@ -777,25 +777,42 @@
     const id = 'tx-' + Date.now();
     const row = makeTransferRow(file.name, file.size, id, 'out');
     const fill = row.querySelector('.bar-fill');
+    const pctEl = row.querySelector('.t-pct');
+    const speedEl = row.querySelector('.t-speed');
 
     activeConn.send({ type: 'meta', name: file.name, size: file.size, mime: file.type, id });
 
-    const reader = new FileReader();
-    let offset = 0;
+    // Grab the real underlying WebRTC data channel so we can react to its
+    // buffer draining precisely, instead of guessing with a fixed delay.
+    const dc = activeConn.dataChannel || activeConn._dc || null;
+    const HIGH_WATER = 4 * 1024 * 1024;  // pause sending above 4MB queued
+    const LOW_WATER  = 1 * 1024 * 1024;  // resume once it drains below 1MB
+    if(dc) dc.bufferedAmountLowThreshold = LOW_WATER;
 
-    function readSlice(o){
-      const slice = file.slice(o, o + CHUNK_SIZE);
-      reader.readAsArrayBuffer(slice);
+    function waitForDrain(){
+      if(dc){
+        return new Promise((resolve) => {
+          const onLow = () => { dc.removeEventListener('bufferedamountlow', onLow); resolve(); };
+          dc.addEventListener('bufferedamountlow', onLow);
+        });
+      }
+      // Fallback for environments where the raw channel isn't exposed
+      return new Promise((resolve) => {
+        const check = () => (!activeConn || activeConn.bufferSize <= 4) ? resolve() : setTimeout(check, 15);
+        check();
+      });
     }
 
-    const pctEl = row.querySelector('.t-pct');
-    const speedEl = row.querySelector('.t-speed');
+    let offset = 0;
     let lastTick = performance.now();
     let lastOffset = 0;
 
-    reader.onload = (e) => {
-      activeConn.send({ type: 'chunk', id, data: e.target.result });
-      offset += e.target.result.byteLength;
+    while(offset < file.size && activeConn){
+      const slice = file.slice(offset, offset + CHUNK_SIZE);
+      const buf = await slice.arrayBuffer();
+      activeConn.send({ type: 'chunk', id, data: buf });
+      offset += buf.byteLength;
+
       const pct = Math.min(100, Math.round((offset / file.size) * 100));
       fill.style.width = pct + '%';
       pctEl.textContent = pct + '%';
@@ -807,27 +824,18 @@
         lastTick = now;
         lastOffset = offset;
       }
-      if(offset < file.size){
-        if(activeConn.bufferSize > 8){
-          const waitForBuffer = () => {
-            if(!activeConn || activeConn.bufferSize <= 4){
-              readSlice(offset);
-            } else {
-              setTimeout(waitForBuffer, 15);
-            }
-          };
-          waitForBuffer();
-        } else {
-          readSlice(offset);
-        }
-      } else {
-        activeConn.send({ type: 'end', id });
-        pctEl.textContent = 'sent — waiting…';
-        showToast(`${file.name} sent — waiting for delivery`);
-      }
-    };
 
-    readSlice(0);
+      const bufferedNow = dc ? dc.bufferedAmount : (activeConn.bufferSize > 8 ? HIGH_WATER + 1 : 0);
+      if(bufferedNow > HIGH_WATER){
+        await waitForDrain();
+      }
+    }
+
+    if(activeConn){
+      activeConn.send({ type: 'end', id });
+      pctEl.textContent = 'sent — waiting…';
+      showToast(`${file.name} sent — waiting for delivery`);
+    }
   }
 
   // ---- receiving ----
