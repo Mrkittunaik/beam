@@ -633,12 +633,31 @@
       const row = document.getElementById('rx-' + msg.id);
       if(row){
         row.classList.add('done');
+
         const link = document.createElement('a');
         link.href = url;
         link.download = rec.name;
         link.className = 'dl';
-        link.textContent = 'Save file';
+        link.textContent = 'Save file again';
         row.appendChild(link);
+
+        // Trigger the download automatically so it lands in Downloads
+        // without the person needing to find and tap the button.
+        // The manual link above stays as a fallback in case the browser
+        // blocks the automatic trigger (common when several files land at once).
+        const autoLink = document.createElement('a');
+        autoLink.href = url;
+        autoLink.download = rec.name;
+        document.body.appendChild(autoLink);
+        autoLink.click();
+        document.body.removeChild(autoLink);
+
+        const savedTag = document.createElement('span');
+        savedTag.className = 't-meta mono';
+        savedTag.style.marginLeft = '10px';
+        savedTag.style.color = 'var(--teal)';
+        savedTag.textContent = 'Saved ✓';
+        row.querySelector('.t-top').appendChild(savedTag);
       }
       delete incoming[msg.id];
     }
