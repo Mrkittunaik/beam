@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beam — send it straight across</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg: #12161c;
+    --surface: #1a2028;
+    --surface-2: #202834;
+    --line: #2a3340;
+    --text: #e7ebee;
+    --muted: #8d97a5;
+    --teal: #55e0c9;
+    --teal-dim: #2c5951;
+    --amber: #f2a340;
+    --danger: #e8636b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    min-height:100vh;
+    background:
+      radial-gradient(circle at 50% -10%, rgba(85,224,201,0.08), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Space Grotesk', system-ui, sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:32px 16px;
+  }
+  @font-face{font-family:'Space Grotesk';src:local('Space Grotesk');}
+
+  .mono{font-family:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;}
+
+  .wrap{ width:100%; max-width:460px; }
+
+  .brand{
+    text-align:center;
+    margin-bottom:28px;
+  }
+  .brand .mark{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:44px;height:44px;
+    border-radius:50%;
+    border:1.5px solid var(--teal-dim);
+    margin-bottom:12px;
+    position:relative;
+  }
+  .brand .mark::before{
+    content:"";
+    width:8px;height:8px;
+    border-radius:50%;
+    background:var(--teal);
+  }
+  .brand h1{
+    font-size:26px;
+    font-weight:600;
+    margin:0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .brand p{
+    color:var(--muted);
+    font-size:14px;
+    margin:0;
+  }
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:26px;
+    margin-bottom:16px;
+  }
+
+  .row-label{
+    font-size:12px;
+    color:var(--muted);
+    margin-bottom:10px;
+  }
+
+  /* radar hero for own code */
+  .radar{
+    position:relative;
+    width:100%;
+    height:132px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin-bottom:18px;
+  }
+  .radar .ring{
+    position:absolute;
+    border-radius:50%;
+    border:1px solid var(--teal-dim);
+  }
+  .radar .ring.r1{width:60px;height:60px;}
+  .radar .ring.r2{width:100px;height:100px;}
+  .radar .ring.r3{width:132px;height:132px;}
+  .radar .pulse{
+    position:absolute;
+    width:60px;height:60px;
+    border-radius:50%;
+    border:1px solid var(--teal);
+    opacity:0;
+    animation: pulse 2.6s ease-out infinite;
+  }
+  .radar .pulse.delay{animation-delay:1.3s;}
+  @keyframes pulse{
+    0%{ width:60px;height:60px; opacity:0.7; }
+    100%{ width:132px;height:132px; opacity:0; }
+  }
+  .radar .core{
+    position:relative;
+    width:14px;height:14px;
+    border-radius:50%;
+    background:var(--teal);
+    box-shadow:0 0 18px 2px rgba(85,224,201,0.55);
+  }
+  @media (prefers-reduced-motion: reduce){
+    .radar .pulse{animation:none;opacity:0;}
+  }
+
+  .code-display{
+    text-align:center;
+  }
+  .code-display .code{
+    font-size:26px;
+    letter-spacing:0.06em;
+    font-weight:600;
+    color:var(--text);
+    margin-bottom:6px;
+  }
+  .code-display .status{
+    font-size:13px;
+    color:var(--muted);
+  }
+  .code-display .status.live{color:var(--teal);}
+
+  .actions-row{
+    display:flex;
+    gap:10px;
+    margin-top:18px;
+  }
+
+  button{
+    font-family:inherit;
+    cursor:pointer;
+    border:none;
+    border-radius:10px;
+    padding:12px 16px;
+    font-size:14px;
+    font-weight:600;
+    transition:transform 0.08s ease, background 0.15s ease;
+  }
+  button:active{transform:scale(0.98);}
+
+  .btn-primary{
+    background:var(--teal);
+    color:#0b1310;
+    flex:1;
+  }
+  .btn-primary:hover{background:#6fe9d4;}
+  .btn-primary:disabled{background:var(--surface-2);color:var(--muted);cursor:not-allowed;}
+
+  .btn-ghost{
+    background:var(--surface-2);
+    color:var(--text);
+    border:1px solid var(--line);
+  }
+  .btn-ghost:hover{border-color:var(--teal-dim);}
+
+  .qr-wrap{
+    display:flex;
+    justify-content:center;
+    margin-top:16px;
+  }
+  #qrcode{
+    padding:10px;
+    background:#fff;
+    border-radius:10px;
+  }
+
+  .divider{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:22px 0;
+    color:var(--muted);
+    font-size:12px;
+  }
+  .divider::before, .divider::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+
+  .connect-row{
+    display:flex;
+    gap:8px;
+  }
+  .connect-row input{
+    flex:1;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px;
+    color:var(--text);
+    font-size:15px;
+    letter-spacing:0.04em;
+    outline:none;
+  }
+  .connect-row input:focus{border-color:var(--teal-dim);}
+  .connect-row input::placeholder{color:#5a6472;}
+
+  .peer-status{
+    display:none;
+    align-items:center;
+    gap:10px;
+    padding:12px 14px;
+    background:var(--surface-2);
+    border:1px solid var(--teal-dim);
+    border-radius:10px;
+    margin-bottom:16px;
+    font-size:13px;
+  }
+  .peer-status.show{display:flex;}
+  .peer-status .dot{
+    width:8px;height:8px;
+    border-radius:50%;
+    background:var(--teal);
+    flex-shrink:0;
+    box-shadow:0 0 8px 1px rgba(85,224,201,0.6);
+  }
+  .peer-status span.name{color:var(--text);font-weight:600;}
+
+  .dropzone{
+    border:1.5px dashed var(--line);
+    border-radius:14px;
+    padding:30px 16px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    cursor:pointer;
+    transition:border-color 0.15s ease, background 0.15s ease;
+  }
+  .dropzone.drag{
+    border-color:var(--teal);
+    background:rgba(85,224,201,0.05);
+    color:var(--text);
+  }
+  .dropzone strong{color:var(--text);font-weight:600;}
+
+  .transfer-list{margin-top:14px;}
+  .transfer{
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:8px;
+  }
+  .transfer .t-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:13px;
+    margin-bottom:8px;
+    gap:10px;
+  }
+  .transfer .t-name{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:var(--text);
+  }
+  .transfer .t-meta{
+    color:var(--muted);
+    font-size:11px;
+    flex-shrink:0;
+  }
+  .bar{
+    height:5px;
+    background:#111721;
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;
+    background:var(--teal);
+    width:0%;
+    transition:width 0.15s ease;
+  }
+  .transfer.done .bar-fill{background:var(--amber);}
+  .transfer a.dl{
+    display:inline-block;
+    margin-top:8px;
+    font-size:12px;
+    color:var(--teal);
+    text-decoration:none;
+    font-weight:600;
+  }
+  .transfer a.dl:hover{text-decoration:underline;}
+
+  .hint{
+    font-size:12px;
+    color:var(--muted);
+    text-align:center;
+    margin-top:6px;
+  }
+  .error-banner{
+    display:none;
+    background:rgba(232,99,107,0.1);
+    border:1px solid var(--danger);
+    color:#f3a4a8;
+    padding:10px 14px;
+    border-radius:10px;
+    font-size:13px;
+    margin-bottom:16px;
+  }
+  .error-banner.show{display:block;}
+
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="brand">
+    <div class="mark"></div>
+    <h1>Beam</h1>
+    <p>Direct device-to-device transfer. Nothing touches a server.</p>
+  </div>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- Your code -->
+  <div class="card" id="ownCard">
+    <div class="row-label">Your device's code</div>
+    <div class="radar">
+      <div class="ring r3"></div>
+      <div class="ring r2"></div>
+      <div class="ring r1"></div>
+      <div class="pulse"></div>
+      <div class="pulse delay"></div>
+      <div class="core"></div>
+    </div>
+    <div class="code-display">
+      <div class="code mono" id="myCode">connecting…</div>
+      <div class="status" id="myStatus">setting up your device</div>
+    </div>
+    <div class="actions-row">
+      <button class="btn-primary" id="copyBtn" disabled>Copy code</button>
+      <button class="btn-ghost" id="qrBtn" disabled>Show QR</button>
+    </div>
+    <div class="qr-wrap" id="qrWrap" style="display:none;">
+      <div id="qrcode"></div>
+    </div>
+  </div>
+
+  <div class="divider">on the other device</div>
+
+  <!-- Connect to peer -->
+  <div class="card">
+    <div class="row-label">Enter the code shown there</div>
+    <div class="connect-row">
+      <input type="text" id="peerInput" class="mono" placeholder="e.g. amber-otter-42" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button class="btn-primary" id="connectBtn" style="flex:0 0 auto;">Connect</button>
+    </div>
+    <p class="hint">Or scan their QR code with your phone's camera.</p>
+  </div>
+
+  <!-- Active connection + transfer -->
+  <div class="card" id="transferCard" style="display:none;">
+    <div class="peer-status" id="peerStatus">
+      <div class="dot"></div>
+      <span>Connected to <span class="name" id="peerName">—</span></span>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <strong>Drop a file here</strong> or tap to choose one to send
+    </div>
+    <input type="file" id="fileInput">
+
+    <div class="transfer-list" id="transferList"></div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const ADJ = ["amber","teal","quiet","swift","violet","coral","cedar","iron","misty","bold","dusty","clear"];
+  const NOUN = ["otter","hawk","ember","ridge","harbor","maple","comet","willow","rover","falcon","glacier","finch"];
+
+  function shortCode(){
+    const a = ADJ[Math.floor(Math.random()*ADJ.length)];
+    const n = NOUN[Math.floor(Math.random()*NOUN.length)];
+    const num = Math.floor(Math.random()*90)+10;
+    return `${a}-${n}-${num}`;
+  }
+
+  // PeerJS requires ids to be reasonably unique + url-safe; our code is fine.
+  const myCodeValue = shortCode();
+  let peer = null;
+  let activeConn = null;
+  const CHUNK_SIZE = 16 * 1024;
+
+  const el = (id) => document.getElementById(id);
+  const myCodeEl = el('myCode');
+  const myStatusEl = el('myStatus');
+  const copyBtn = el('copyBtn');
+  const qrBtn = el('qrBtn');
+  const qrWrap = el('qrWrap');
+  const peerInput = el('peerInput');
+  const connectBtn = el('connectBtn');
+  const transferCard = el('transferCard');
+  const peerStatus = el('peerStatus');
+  const peerName = el('peerName');
+  const dropzone = el('dropzone');
+  const fileInput = el('fileInput');
+  const transferList = el('transferList');
+  const errorBanner = el('errorBanner');
+
+  function showError(msg){
+    errorBanner.textContent = msg;
+    errorBanner.classList.add('show');
+    setTimeout(()=> errorBanner.classList.remove('show'), 5000);
+  }
+
+  function initPeer(){
+    peer = new Peer(myCodeValue, {
+      debug: 0
+    });
+
+    peer.on('open', (id) => {
+      myCodeEl.textContent = id;
+      myStatusEl.textContent = 'ready — share this code';
+      myStatusEl.classList.add('live');
+      copyBtn.disabled = false;
+      qrBtn.disabled = false;
+      new QRCode(document.getElementById('qrcode'), {
+        text: id,
+        width: 140,
+        height: 140,
+        colorDark: '#12161c',
+        colorLight: '#ffffff'
+      });
+    });
+
+    peer.on('connection', (conn) => {
+      wireConnection(conn);
+    });
+
+    peer.on('error', (err) => {
+      if(err.type === 'peer-unavailable'){
+        showError("That code isn't online right now. Double check it and try again.");
+      } else if(err.type === 'unavailable-id'){
+        // extremely rare collision — regenerate
+        peer.destroy();
+        setTimeout(initPeer, 300);
+      } else {
+        showError('Connection issue: ' + err.type);
+      }
+    });
+
+    peer.on('disconnected', () => {
+      myStatusEl.textContent = 'reconnecting…';
+      myStatusEl.classList.remove('live');
+      peer.reconnect();
+    });
+  }
+
+  initPeer();
+
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(myCodeEl.textContent).then(() => {
+      copyBtn.textContent = 'Copied';
+      setTimeout(()=> copyBtn.textContent = 'Copy code', 1400);
+    });
+  });
+
+  qrBtn.addEventListener('click', () => {
+    const showing = qrWrap.style.display !== 'none';
+    qrWrap.style.display = showing ? 'none' : 'flex';
+    qrBtn.textContent = showing ? 'Show QR' : 'Hide QR';
+  });
+
+  connectBtn.addEventListener('click', () => {
+    const target = peerInput.value.trim().toLowerCase();
+    if(!target) return;
+    if(target === myCodeEl.textContent){
+      showError("That's your own code.");
+      return;
+    }
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Connecting…';
+    const conn = peer.connect(target, { reliable: true });
+    conn.on('open', () => {
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+      wireConnection(conn);
+    });
+    conn.on('error', () => {
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+    });
+    setTimeout(() => {
+      if(connectBtn.disabled){
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect';
+        showError('Could not reach that device. Check the code and that it\'s still open.');
+      }
+    }, 8000);
+  });
+
+  peerInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') connectBtn.click();
+  });
+
+  function wireConnection(conn){
+    activeConn = conn;
+    transferCard.style.display = 'block';
+    peerStatus.classList.add('show');
+    peerName.textContent = conn.peer;
+
+    conn.on('data', handleIncoming);
+    conn.on('close', () => {
+      peerStatus.classList.remove('show');
+      showError('The other device disconnected.');
+      activeConn = null;
+    });
+  }
+
+  // ---- sending ----
+  function pickFile(){ fileInput.click(); }
+  dropzone.addEventListener('click', pickFile);
+  dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    if(e.dataTransfer.files.length) sendFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if(fileInput.files.length) sendFile(fileInput.files[0]);
+    fileInput.value = '';
+  });
+
+  function fmtSize(bytes){
+    if(bytes < 1024) return bytes + ' B';
+    if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+    return (bytes/(1024*1024)).toFixed(1) + ' MB';
+  }
+
+  function makeTransferRow(name, size, id, direction){
+    const row = document.createElement('div');
+    row.className = 'transfer';
+    row.id = id;
+    row.innerHTML = `
+      <div class="t-top">
+        <span class="t-name">${direction === 'out' ? '↑ ' : '↓ '}${name}</span>
+        <span class="t-meta mono">${fmtSize(size)}</span>
+      </div>
+      <div class="bar"><div class="bar-fill"></div></div>
+    `;
+    transferList.prepend(row);
+    return row;
+  }
+
+  function sendFile(file){
+    if(!activeConn){
+      showError('Connect to a device first.');
+      return;
+    }
+    const id = 'tx-' + Date.now();
+    const row = makeTransferRow(file.name, file.size, id, 'out');
+    const fill = row.querySelector('.bar-fill');
+
+    activeConn.send({ type: 'meta', name: file.name, size: file.size, mime: file.type, id });
+
+    const reader = new FileReader();
+    let offset = 0;
+
+    function readSlice(o){
+      const slice = file.slice(o, o + CHUNK_SIZE);
+      reader.readAsArrayBuffer(slice);
+    }
+
+    reader.onload = (e) => {
+      activeConn.send({ type: 'chunk', id, data: e.target.result });
+      offset += e.target.result.byteLength;
+      const pct = Math.min(100, Math.round((offset / file.size) * 100));
+      fill.style.width = pct + '%';
+      if(offset < file.size){
+        readSlice(offset);
+      } else {
+        activeConn.send({ type: 'end', id });
+        row.classList.add('done');
+      }
+    };
+
+    readSlice(0);
+  }
+
+  // ---- receiving ----
+  const incoming = {};
+  function handleIncoming(msg){
+    if(msg.type === 'meta'){
+      incoming[msg.id] = { name: msg.name, size: msg.size, mime: msg.mime, chunks: [], received: 0 };
+      makeTransferRow(msg.name, msg.size, 'rx-' + msg.id, 'in');
+    } else if(msg.type === 'chunk'){
+      const rec = incoming[msg.id];
+      if(!rec) return;
+      rec.chunks.push(msg.data);
+      rec.received += msg.data.byteLength;
+      const row = document.getElementById('rx-' + msg.id);
+      if(row){
+        const pct = Math.min(100, Math.round((rec.received / rec.size) * 100));
+        row.querySelector('.bar-fill').style.width = pct + '%';
+      }
+    } else if(msg.type === 'end'){
+      const rec = incoming[msg.id];
+      if(!rec) return;
+      const blob = new Blob(rec.chunks, { type: rec.mime || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const row = document.getElementById('rx-' + msg.id);
+      if(row){
+        row.classList.add('done');
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = rec.name;
+        link.className = 'dl';
+        link.textContent = 'Save file';
+        row.appendChild(link);
+      }
+      delete incoming[msg.id];
+    }
+  }
+
+})();
+</script>
+
+</body>
+</html>
