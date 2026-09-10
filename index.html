@@ -6,6 +6,7 @@
 <title>Beam — send it straight across</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
 <style>
   :root{
     --bg: #12161c;
@@ -370,6 +371,63 @@
     font-size:11px;
     margin-left:6px;
   }
+
+  .connect-row{ flex-wrap:wrap; }
+  .btn-scan{
+    background:var(--surface-2);
+    color:var(--text);
+    border:1px solid var(--line);
+    flex:0 0 auto;
+  }
+  .btn-scan:hover{ border-color:var(--teal-dim); }
+
+  .scan-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(8,10,14,0.92);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    z-index:60;
+    padding:24px;
+  }
+  .scan-overlay.show{ display:flex; }
+  .scan-frame{
+    position:relative;
+    width:min(320px, 84vw);
+    height:min(320px, 84vw);
+    border-radius:16px;
+    overflow:hidden;
+    background:#000;
+    border:1px solid var(--line);
+  }
+  .scan-frame video{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+  }
+  .scan-frame .guide{
+    position:absolute;
+    inset:14%;
+    border:2px solid var(--teal);
+    border-radius:14px;
+    box-shadow:0 0 0 999px rgba(0,0,0,0.35);
+    pointer-events:none;
+  }
+  .scan-label{
+    color:var(--muted);
+    font-size:13px;
+    margin-top:16px;
+    text-align:center;
+  }
+  .scan-close{
+    margin-top:16px;
+    background:var(--surface-2);
+    color:var(--text);
+    border:1px solid var(--line);
+    padding:10px 20px;
+  }
 </style>
 </head>
 <body>
@@ -418,8 +476,18 @@
     <div class="connect-row">
       <input type="text" id="peerInput" class="mono" placeholder="e.g. amber-otter-42" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button class="btn-primary" id="connectBtn" style="flex:0 0 auto;">Connect</button>
+      <button class="btn-scan" id="scanBtn">Scan QR</button>
     </div>
-    <p class="hint">Or scan their QR code with your phone's camera.</p>
+    <p class="hint">Point your camera at their QR code, or type the code by hand.</p>
+  </div>
+
+  <div class="scan-overlay" id="scanOverlay">
+    <div class="scan-frame">
+      <video id="scanVideo" playsinline muted></video>
+      <div class="guide"></div>
+    </div>
+    <div class="scan-label" id="scanLabel">Point your camera at the other device's QR code</div>
+    <button class="scan-close" id="scanClose">Cancel</button>
   </div>
 
   <!-- Active connection + transfer -->
@@ -577,6 +645,72 @@
   peerInput.addEventListener('keydown', (e) => {
     if(e.key === 'Enter') connectBtn.click();
   });
+
+  // ---- QR scanning ----
+  const scanOverlay = el('scanOverlay');
+  const scanVideo = el('scanVideo');
+  const scanLabel = el('scanLabel');
+  const scanBtn = el('scanBtn');
+  const scanClose = el('scanClose');
+  const scanCanvas = document.createElement('canvas');
+  const scanCtx = scanCanvas.getContext('2d');
+  let scanStream = null;
+  let scanRAF = null;
+
+  async function startScan(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showError('Camera access is not available on this browser.');
+      return;
+    }
+    scanOverlay.classList.add('show');
+    scanLabel.textContent = "Point your camera at the other device's QR code";
+    try{
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      scanVideo.srcObject = scanStream;
+      await scanVideo.play();
+      scanRAF = requestAnimationFrame(scanFrame);
+    } catch(err){
+      scanLabel.textContent = 'Camera permission was denied or no camera is available.';
+    }
+  }
+
+  function scanFrame(){
+    if(scanVideo.readyState === scanVideo.HAVE_ENOUGH_DATA){
+      scanCanvas.width = scanVideo.videoWidth;
+      scanCanvas.height = scanVideo.videoHeight;
+      scanCtx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if(code && code.data){
+        onScanSuccess(code.data.trim());
+        return;
+      }
+    }
+    scanRAF = requestAnimationFrame(scanFrame);
+  }
+
+  function stopScan(){
+    if(scanRAF) cancelAnimationFrame(scanRAF);
+    if(scanStream){
+      scanStream.getTracks().forEach(t => t.stop());
+      scanStream = null;
+    }
+    scanOverlay.classList.remove('show');
+  }
+
+  function onScanSuccess(value){
+    scanLabel.textContent = 'Code found — connecting…';
+    setTimeout(() => {
+      stopScan();
+      peerInput.value = value;
+      connectBtn.click();
+    }, 250);
+  }
+
+  scanBtn.addEventListener('click', startScan);
+  scanClose.addEventListener('click', stopScan);
 
   function wireConnection(conn){
     activeConn = conn;
