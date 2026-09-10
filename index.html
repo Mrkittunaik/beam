@@ -327,9 +327,54 @@
   .error-banner.show{display:block;}
 
   input[type=file]{display:none;}
+
+  .toast-stack{
+    position:fixed;
+    top:18px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    z-index:50;
+    align-items:center;
+  }
+  .toast{
+    background:var(--surface-2);
+    border:1px solid var(--teal-dim);
+    color:var(--text);
+    padding:10px 16px;
+    border-radius:10px;
+    font-size:13px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.35);
+    opacity:0;
+    transform:translateY(-8px);
+    animation: toastIn 0.2s ease forwards, toastOut 0.25s ease forwards 2.6s;
+  }
+  .toast .dot{
+    width:7px;height:7px;
+    border-radius:50%;
+    background:var(--teal);
+    flex-shrink:0;
+  }
+  .toast.warn .dot{ background: var(--danger); }
+  @keyframes toastIn{ to{ opacity:1; transform:translateY(0); } }
+  @keyframes toastOut{ to{ opacity:0; transform:translateY(-8px); } }
+
+  .t-pct{
+    color:var(--teal);
+    font-weight:600;
+    font-size:11px;
+    margin-left:6px;
+  }
 </style>
 </head>
 <body>
+
+<div class="toast-stack" id="toastStack"></div>
 
 <div class="wrap">
 
@@ -434,6 +479,15 @@
     setTimeout(()=> errorBanner.classList.remove('show'), 5000);
   }
 
+  function showToast(msg, warn){
+    const stack = document.getElementById('toastStack');
+    const t = document.createElement('div');
+    t.className = 'toast' + (warn ? ' warn' : '');
+    t.innerHTML = `<span class="dot"></span><span>${msg}</span>`;
+    stack.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
+
   function initPeer(){
     peer = new Peer(myCodeValue, {
       debug: 0
@@ -529,11 +583,12 @@
     transferCard.style.display = 'block';
     peerStatus.classList.add('show');
     peerName.textContent = conn.peer;
+    showToast(`Connected to ${conn.peer}`);
 
     conn.on('data', handleIncoming);
     conn.on('close', () => {
       peerStatus.classList.remove('show');
-      showError('The other device disconnected.');
+      showToast(`${conn.peer} disconnected`, true);
       activeConn = null;
     });
   }
@@ -566,7 +621,7 @@
     row.innerHTML = `
       <div class="t-top">
         <span class="t-name">${direction === 'out' ? '↑ ' : '↓ '}${name}</span>
-        <span class="t-meta mono">${fmtSize(size)}</span>
+        <span class="t-meta mono">${fmtSize(size)}<span class="t-pct">0%</span></span>
       </div>
       <div class="bar"><div class="bar-fill"></div></div>
     `;
@@ -593,16 +648,20 @@
       reader.readAsArrayBuffer(slice);
     }
 
+    const pctEl = row.querySelector('.t-pct');
+
     reader.onload = (e) => {
       activeConn.send({ type: 'chunk', id, data: e.target.result });
       offset += e.target.result.byteLength;
       const pct = Math.min(100, Math.round((offset / file.size) * 100));
       fill.style.width = pct + '%';
+      pctEl.textContent = pct + '%';
       if(offset < file.size){
         readSlice(offset);
       } else {
         activeConn.send({ type: 'end', id });
-        row.classList.add('done');
+        pctEl.textContent = 'sent — waiting…';
+        showToast(`${file.name} sent — waiting for delivery`);
       }
     };
 
@@ -615,6 +674,7 @@
     if(msg.type === 'meta'){
       incoming[msg.id] = { name: msg.name, size: msg.size, mime: msg.mime, chunks: [], received: 0 };
       makeTransferRow(msg.name, msg.size, 'rx-' + msg.id, 'in');
+      showToast(`Receiving ${msg.name}…`);
     } else if(msg.type === 'chunk'){
       const rec = incoming[msg.id];
       if(!rec) return;
@@ -624,6 +684,8 @@
       if(row){
         const pct = Math.min(100, Math.round((rec.received / rec.size) * 100));
         row.querySelector('.bar-fill').style.width = pct + '%';
+        const pctEl = row.querySelector('.t-pct');
+        if(pctEl) pctEl.textContent = pct + '%';
       }
     } else if(msg.type === 'end'){
       const rec = incoming[msg.id];
@@ -633,6 +695,8 @@
       const row = document.getElementById('rx-' + msg.id);
       if(row){
         row.classList.add('done');
+        const pctEl = row.querySelector('.t-pct');
+        if(pctEl) pctEl.textContent = 'saved ✓';
 
         const link = document.createElement('a');
         link.href = url;
@@ -652,14 +716,21 @@
         autoLink.click();
         document.body.removeChild(autoLink);
 
-        const savedTag = document.createElement('span');
-        savedTag.className = 't-meta mono';
-        savedTag.style.marginLeft = '10px';
-        savedTag.style.color = 'var(--teal)';
-        savedTag.textContent = 'Saved ✓';
-        row.querySelector('.t-top').appendChild(savedTag);
+        showToast(`Saved ${rec.name}`);
       }
+      // Let the sender know we actually have the file now.
+      if(activeConn) activeConn.send({ type: 'ack', id: msg.id });
       delete incoming[msg.id];
+    } else if(msg.type === 'ack'){
+      const row = document.getElementById(msg.id);
+      if(row){
+        row.classList.add('done');
+        const pctEl = row.querySelector('.t-pct');
+        if(pctEl) pctEl.textContent = 'delivered ✓';
+        const nameEl = row.querySelector('.t-name');
+        const label = nameEl ? nameEl.textContent.replace('↑ ', '') : 'File';
+        showToast(`${label} delivered`);
+      }
     }
   }
 
