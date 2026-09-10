@@ -371,6 +371,11 @@
     font-size:11px;
     margin-left:6px;
   }
+  .t-speed{
+    color:var(--amber);
+    font-size:11px;
+    margin-left:6px;
+  }
 
   .connect-row{ flex-wrap:wrap; }
   .btn-scan{
@@ -474,11 +479,11 @@
   <div class="card">
     <div class="row-label">Enter the code shown there</div>
     <div class="connect-row">
-      <input type="text" id="peerInput" class="mono" placeholder="e.g. amber-otter-42" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <input type="text" id="peerInput" class="mono" placeholder="0000" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button class="btn-primary" id="connectBtn" style="flex:0 0 auto;">Connect</button>
       <button class="btn-scan" id="scanBtn">Scan QR</button>
     </div>
-    <p class="hint">Point your camera at their QR code, or type the code by hand.</p>
+    <p class="hint">Point your camera at their QR code, or type the 4-digit code by hand.</p>
   </div>
 
   <div class="scan-overlay" id="scanOverlay">
@@ -509,21 +514,16 @@
 
 <script>
 (function(){
-  const ADJ = ["amber","teal","quiet","swift","violet","coral","cedar","iron","misty","bold","dusty","clear"];
-  const NOUN = ["otter","hawk","ember","ridge","harbor","maple","comet","willow","rover","falcon","glacier","finch"];
+  const PIN_PREFIX = 'beam-';
 
   function shortCode(){
-    const a = ADJ[Math.floor(Math.random()*ADJ.length)];
-    const n = NOUN[Math.floor(Math.random()*NOUN.length)];
-    const num = Math.floor(Math.random()*90)+10;
-    return `${a}-${n}-${num}`;
+    return String(Math.floor(1000 + Math.random() * 9000)); // 4-digit PIN
   }
 
-  // PeerJS requires ids to be reasonably unique + url-safe; our code is fine.
-  const myCodeValue = shortCode();
+  let myPin = shortCode();
   let peer = null;
   let activeConn = null;
-  const CHUNK_SIZE = 16 * 1024;
+  const CHUNK_SIZE = 256 * 1024; // 256KB — tuned for large-file throughput
 
   const el = (id) => document.getElementById(id);
   const myCodeEl = el('myCode');
@@ -557,18 +557,18 @@
   }
 
   function initPeer(){
-    peer = new Peer(myCodeValue, {
+    peer = new Peer(PIN_PREFIX + myPin, {
       debug: 0
     });
 
     peer.on('open', (id) => {
-      myCodeEl.textContent = id;
+      myCodeEl.textContent = myPin;
       myStatusEl.textContent = 'ready — share this code';
       myStatusEl.classList.add('live');
       copyBtn.disabled = false;
       qrBtn.disabled = false;
       new QRCode(document.getElementById('qrcode'), {
-        text: id,
+        text: myPin,
         width: 140,
         height: 140,
         colorDark: '#12161c',
@@ -584,7 +584,8 @@
       if(err.type === 'peer-unavailable'){
         showError("That code isn't online right now. Double check it and try again.");
       } else if(err.type === 'unavailable-id'){
-        // extremely rare collision — regenerate
+        // that PIN is already taken globally right now — grab a fresh one
+        myPin = shortCode();
         peer.destroy();
         setTimeout(initPeer, 300);
       } else {
@@ -602,7 +603,7 @@
   initPeer();
 
   copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(myCodeEl.textContent).then(() => {
+    navigator.clipboard.writeText(myPin).then(() => {
       copyBtn.textContent = 'Copied';
       setTimeout(()=> copyBtn.textContent = 'Copy code', 1400);
     });
@@ -615,15 +616,19 @@
   });
 
   connectBtn.addEventListener('click', () => {
-    const target = peerInput.value.trim().toLowerCase();
+    const target = peerInput.value.trim();
     if(!target) return;
-    if(target === myCodeEl.textContent){
+    if(!/^\d{4}$/.test(target)){
+      showError('Enter the 4-digit code exactly as shown on the other device.');
+      return;
+    }
+    if(target === myPin){
       showError("That's your own code.");
       return;
     }
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting…';
-    const conn = peer.connect(target, { reliable: true });
+    const conn = peer.connect(PIN_PREFIX + target, { reliable: true });
     conn.on('open', () => {
       connectBtn.disabled = false;
       connectBtn.textContent = 'Connect';
@@ -716,13 +721,14 @@
     activeConn = conn;
     transferCard.style.display = 'block';
     peerStatus.classList.add('show');
-    peerName.textContent = conn.peer;
-    showToast(`Connected to ${conn.peer}`);
+    const displayPin = conn.peer.replace(PIN_PREFIX, '');
+    peerName.textContent = displayPin;
+    showToast(`Connected to ${displayPin}`);
 
     conn.on('data', handleIncoming);
     conn.on('close', () => {
       peerStatus.classList.remove('show');
-      showToast(`${conn.peer} disconnected`, true);
+      showToast(`${displayPin} disconnected`, true);
       activeConn = null;
     });
   }
@@ -755,7 +761,7 @@
     row.innerHTML = `
       <div class="t-top">
         <span class="t-name">${direction === 'out' ? '↑ ' : '↓ '}${name}</span>
-        <span class="t-meta mono">${fmtSize(size)}<span class="t-pct">0%</span></span>
+        <span class="t-meta mono">${fmtSize(size)}<span class="t-pct">0%</span> <span class="t-speed mono"></span></span>
       </div>
       <div class="bar"><div class="bar-fill"></div></div>
     `;
@@ -783,6 +789,9 @@
     }
 
     const pctEl = row.querySelector('.t-pct');
+    const speedEl = row.querySelector('.t-speed');
+    let lastTick = performance.now();
+    let lastOffset = 0;
 
     reader.onload = (e) => {
       activeConn.send({ type: 'chunk', id, data: e.target.result });
@@ -790,8 +799,27 @@
       const pct = Math.min(100, Math.round((offset / file.size) * 100));
       fill.style.width = pct + '%';
       pctEl.textContent = pct + '%';
+
+      const now = performance.now();
+      if(now - lastTick > 400){
+        const mbps = ((offset - lastOffset) / 1024 / 1024) / ((now - lastTick) / 1000);
+        speedEl.textContent = mbps.toFixed(1) + ' MB/s';
+        lastTick = now;
+        lastOffset = offset;
+      }
       if(offset < file.size){
-        readSlice(offset);
+        if(activeConn.bufferSize > 8){
+          const waitForBuffer = () => {
+            if(!activeConn || activeConn.bufferSize <= 4){
+              readSlice(offset);
+            } else {
+              setTimeout(waitForBuffer, 15);
+            }
+          };
+          waitForBuffer();
+        } else {
+          readSlice(offset);
+        }
       } else {
         activeConn.send({ type: 'end', id });
         pctEl.textContent = 'sent — waiting…';
@@ -806,7 +834,7 @@
   const incoming = {};
   function handleIncoming(msg){
     if(msg.type === 'meta'){
-      incoming[msg.id] = { name: msg.name, size: msg.size, mime: msg.mime, chunks: [], received: 0 };
+      incoming[msg.id] = { name: msg.name, size: msg.size, mime: msg.mime, chunks: [], received: 0, lastTick: performance.now(), lastReceived: 0 };
       makeTransferRow(msg.name, msg.size, 'rx-' + msg.id, 'in');
       showToast(`Receiving ${msg.name}…`);
     } else if(msg.type === 'chunk'){
@@ -820,6 +848,15 @@
         row.querySelector('.bar-fill').style.width = pct + '%';
         const pctEl = row.querySelector('.t-pct');
         if(pctEl) pctEl.textContent = pct + '%';
+
+        const now = performance.now();
+        if(now - rec.lastTick > 400){
+          const mbps = ((rec.received - rec.lastReceived) / 1024 / 1024) / ((now - rec.lastTick) / 1000);
+          const speedEl = row.querySelector('.t-speed');
+          if(speedEl) speedEl.textContent = mbps.toFixed(1) + ' MB/s';
+          rec.lastTick = now;
+          rec.lastReceived = rec.received;
+        }
       }
     } else if(msg.type === 'end'){
       const rec = incoming[msg.id];
